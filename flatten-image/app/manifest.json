@@ -1,0 +1,78 @@
+{
+    "schemaVersion": "1.8.0",
+    "acapPackageConf": {
+        "setup": {
+            "friendlyName": "Flatten Image",
+            "appName": "flatten_image",
+            "vendor": "Axis Communications",
+            "embeddedSdkVersion": "3.0",
+            "vendorUrl": "https://www.axis.com",
+            "runMode": "respawn",
+            "version": "1.0.0"
+        },
+        "configuration": {
+            "paramConfig": [
+                {
+                    "name": "LensType",
+                    "default": "fisheye",
+                    "type": "enum:fisheye,dual_fisheye,panoramic"
+                },
+                {
+                    "name": "Projection",
+                    "default": "equirectangular",
+                    "type": "enum:equirectangular,rectilinear,cylindrical"
+                },
+                {
+                    "name": "InputFOV",
+                    "default": "180",
+                    "type": "string"
+                },
+                {
+                    "name": "OutputWidth",
+                    "default": "1920",
+                    "type": "string"
+                },
+                {
+                    "name": "OutputHeight",
+                    "default": "1080",
+                    "type": "string"
+                },
+                {
+                    "name": "RTSPPort",
+                    "default": "8554",
+                    "type": "string"
+                },
+                {
+                    "name": "Framerate",
+                    "default": "15",
+                    "type": "string"
+                },
+                {
+                    "name": "CenterX",
+                    "default": "0.5",
+                    "type": "string"
+                },
+                {
+                    "name": "CenterY",
+                    "default": "0.5",
+                    "type": "string"
+                },
+                {
+                    "name": "PanAngle",
+                    "default": "0",
+                    "type": "string"
+                },
+                {
+                    "name": "TiltAngle",
+                    "default": "0",
+                    "type": "string"
+                },
+                {
+                    "name": "RectilinearFOV",
+                    "default": "90",
+                    "type": "string"
+                }
+            ]
+        }
+    }
+}
