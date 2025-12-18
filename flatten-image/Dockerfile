@@ -16,6 +16,7 @@ ARG BUILD_DIR=/opt/build
 #-------------------------------------------------------------------------------
 
 # Install build dependencies for cross compiling OpenCV and GStreamer headers
+# Note: libfcgi is available in the ACAP SDK sysroot
 RUN DEBIAN_FRONTEND=noninteractive \
     apt-get update && apt-get install -y -f --no-install-recommends \
     cmake \

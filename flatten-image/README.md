@@ -13,6 +13,7 @@ The application:
 1. Captures video frames from the camera using the VDO API
 2. Applies configurable dewarping transformations using OpenCV
 3. Streams the flattened video via RTSP using GStreamer
+4. Provides HTTP endpoints for retrieving historical snapshots (last 31 seconds)
 
 ### Supported Lens Types
 
@@ -34,7 +35,9 @@ These instructions will guide you on how to execute the code. Below is the struc
 flatten-image
 ├── app
 │   ├── dewarper.cpp/h       # Image dewarping module
+│   ├── fastcgi_server.cpp/h # HTTP endpoint server
 │   ├── flatten_image.cpp    # Main application
+│   ├── image_buffer.cpp/h   # Circular buffer for snapshots
 │   ├── imgprovider.cpp/h    # VDO frame capture
 │   ├── rtsp_server.cpp/h    # GStreamer RTSP server
 │   ├── panic.cpp/h          # Error handling
@@ -128,6 +131,53 @@ Or using ffplay:
 ffplay rtsp://<AXIS_DEVICE_IP>:8554/stream
 ```
 
+## Access HTTP image snapshots
+
+The application provides HTTP endpoints for retrieving historical JPEG snapshots. Images are
+captured once per second and stored in a circular buffer (31 images total).
+
+### Endpoint URL
+
+```
+http://<AXIS_DEVICE_IP>/local/flatten_image/image.cgi?index=<N>
+```
+
+Where `<N>` is the image index:
+- `index=0` - Latest image (current)
+- `index=1` - 1 second ago
+- `index=2` - 2 seconds ago
+- ...
+- `index=30` - 30 seconds ago
+
+### Examples
+
+Get the latest dewarped image:
+
+```sh
+curl -u <USER>:<PASSWORD> "http://<AXIS_DEVICE_IP>/local/flatten_image/image.cgi?index=0" -o latest.jpg
+```
+
+Get the image from 10 seconds ago:
+
+```sh
+curl -u <USER>:<PASSWORD> "http://<AXIS_DEVICE_IP>/local/flatten_image/image.cgi?index=10" -o 10sec_ago.jpg
+```
+
+### Response codes
+
+| Code | Description |
+|------|-------------|
+| 200 | Success - JPEG image returned |
+| 404 | Invalid index (must be 0-30) |
+| 503 | No image available yet (buffer not filled) |
+
+### Notes
+
+- Images are stored in memory only (no disk storage required)
+- The buffer holds approximately 31 seconds of history
+- Each image is JPEG encoded at quality 80
+- Authentication follows device viewer access settings
+
 ## Adjusting parameters
 
 Parameters can be adjusted via the device's parameter CGI:
@@ -165,6 +215,13 @@ from a fixed fisheye camera.
 ### Panoramic Recording
 
 Use equirectangular projection to record full 360-degree scenes in a standard video format.
+
+### Historical Image Retrieval
+
+Use the HTTP snapshot endpoints to retrieve recent images for:
+- Event investigation (what happened 10 seconds ago?)
+- Periodic polling for lightweight integrations
+- Thumbnail generation without video decoding
 
 ## License
 

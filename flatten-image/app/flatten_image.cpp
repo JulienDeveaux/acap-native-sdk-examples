@@ -19,14 +19,18 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <syslog.h>
+#include <chrono>
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wfloat-equal"
 #include <opencv2/core.hpp>
+#include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 #pragma GCC diagnostic pop
 
 #include "dewarper.h"
+#include "fastcgi_server.h"
+#include "image_buffer.h"
 #include "imgprovider.h"
 #include "panic.h"
 #include "rtsp_server.h"
@@ -182,6 +186,28 @@ int main(void) {
         panic("Failed to start RTSP server");
     }
 
+    // Initialize image buffer for historical snapshots
+    ImageBuffer image_buffer;
+    syslog(LOG_INFO, "Image buffer initialized (31 slots for /0 to /30 endpoints)");
+
+    // Initialize FastCGI server if socket is configured
+    FastCGIServer fastcgi_server;
+    bool fastcgi_enabled = false;
+    if (getenv("FCGI_SOCKET_NAME")) {
+        if (fastcgi_server.init(&image_buffer)) {
+            if (fastcgi_server.start()) {
+                fastcgi_enabled = true;
+                syslog(LOG_INFO, "FastCGI server started - endpoints /0 to /30 available");
+            } else {
+                syslog(LOG_WARNING, "Failed to start FastCGI server");
+            }
+        } else {
+            syslog(LOG_WARNING, "Failed to initialize FastCGI server");
+        }
+    } else {
+        syslog(LOG_INFO, "FCGI_SOCKET_NAME not set, HTTP image endpoints disabled");
+    }
+
     // Start video stream
     syslog(LOG_INFO, "Starting video capture");
     if (!img_provider_start(img_provider)) {
@@ -196,6 +222,13 @@ int main(void) {
     syslog(LOG_INFO,
            "Entering main loop - RTSP stream available at rtsp://DEVICE_IP:%u/stream",
            rtsp_port);
+    if (fastcgi_enabled) {
+        syslog(LOG_INFO, "HTTP image endpoints: /local/flatten_image/image.cgi?index=0 to ?index=30");
+    }
+
+    // Track time for saving snapshots to buffer (1 per second)
+    auto last_buffer_save = std::chrono::steady_clock::now();
+    std::vector<int> jpeg_params = {cv::IMWRITE_JPEG_QUALITY, 80};
 
     // Main processing loop
     while (!shutdown_requested) {
@@ -225,6 +258,20 @@ int main(void) {
         // Push frame to RTSP server
         rtsp_server.push_frame(output_bgr);
 
+        // Save snapshot to buffer every second for HTTP endpoints
+        {
+            auto now = std::chrono::steady_clock::now();
+            auto elapsed =
+                std::chrono::duration_cast<std::chrono::milliseconds>(now - last_buffer_save);
+            if (elapsed.count() >= 1000) {
+                std::vector<uchar> jpeg_data;
+                if (cv::imencode(".jpg", output_bgr, jpeg_data, jpeg_params)) {
+                    image_buffer.push(jpeg_data.data(), jpeg_data.size());
+                }
+                last_buffer_save = now;
+            }
+        }
+
     unref_buffer:
         // Release VDO buffer
         if (!vdo_stream_buffer_unref(img_provider->vdo_stream, &vdo_buf, &vdo_error)) {
@@ -238,6 +285,9 @@ int main(void) {
     syslog(LOG_INFO, "Shutting down");
 
     // Cleanup
+    if (fastcgi_enabled) {
+        fastcgi_server.stop();
+    }
     rtsp_server.stop();
     destroy_img_provider(img_provider);
     ax_parameter_free(param_handle);

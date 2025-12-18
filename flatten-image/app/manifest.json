@@ -11,6 +11,13 @@
             "version": "1.0.0"
         },
         "configuration": {
+            "httpConfig": [
+                {
+                    "access": "viewer",
+                    "name": "image.cgi",
+                    "type": "fastCgi"
+                }
+            ],
             "paramConfig": [
                 {
                     "name": "LensType",
