@@ -19,7 +19,9 @@
 #include <gst/gst.h>
 #include <gst/rtsp-server/rtsp-server.h>
 #include <opencv2/core.hpp>
+#include <opencv2/imgcodecs.hpp>
 #include <atomic>
+#include <vector>
 #include <mutex>
 #include <string>
 
@@ -61,7 +63,7 @@ private:
     GMainLoop* main_loop_         = nullptr;
 
     std::mutex frame_mutex_;
-    cv::Mat current_frame_;
+    std::vector<uchar> current_jpeg_;
     std::atomic<bool> frame_available_{false};
     std::atomic<bool> running_{false};
     guint64 timestamp_ = 0;

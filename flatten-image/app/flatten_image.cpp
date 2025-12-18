@@ -199,6 +199,11 @@ int main(void) {
 
     // Main processing loop
     while (!shutdown_requested) {
+        // Process pending GLib events (required for RTSP server to handle clients)
+        while (g_main_context_iteration(nullptr, FALSE)) {
+            // Process all pending events
+        }
+
         g_autoptr(GError) vdo_error = nullptr;
 
         // Get frame from VDO

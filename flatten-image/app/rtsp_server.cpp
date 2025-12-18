@@ -58,17 +58,17 @@ bool RTSPServer::init(const RTSPServerConfig& config) {
         return false;
     }
 
-    // Create pipeline with appsrc feeding into x264 encoder
+    // Create pipeline with appsrc feeding JPEG frames directly to rtpjpegpay
+    // JPEG encoding is done via OpenCV before pushing to appsrc
     gchar* launch_str = g_strdup_printf(
-        "( appsrc name=source is-live=true format=time "
-        "caps=video/x-raw,format=BGR,width=%u,height=%u,framerate=%u/1 "
-        "! videoconvert "
-        "! video/x-raw,format=I420 "
-        "! x264enc tune=zerolatency bitrate=2000 speed-preset=ultrafast "
-        "! rtph264pay name=pay0 pt=96 )",
+        "( appsrc name=source is-live=true format=time do-timestamp=true block=false "
+        "caps=image/jpeg,width=%u,height=%u,framerate=%u/1 "
+        "! rtpjpegpay name=pay0 pt=26 )",
         config_.width,
         config_.height,
         config_.fps);
+
+    syslog(LOG_INFO, "Pipeline: %s", launch_str);
 
     gst_rtsp_media_factory_set_launch(factory_, launch_str);
     g_free(launch_str);
@@ -121,8 +121,21 @@ bool RTSPServer::push_frame(const cv::Mat& bgr_frame) {
         return false;
     }
 
+    // Encode frame to JPEG using OpenCV
+    std::vector<uchar> jpeg_buffer;
+    std::vector<int> params = {cv::IMWRITE_JPEG_QUALITY, 80};
+    if (!cv::imencode(".jpg", bgr_frame, jpeg_buffer, params)) {
+        syslog(LOG_WARNING, "Failed to encode frame to JPEG");
+        return false;
+    }
+
+    static int frame_count = 0;
+    if (++frame_count % 100 == 1) {
+        syslog(LOG_INFO, "Encoded JPEG frame %d, size=%zu bytes", frame_count, jpeg_buffer.size());
+    }
+
     std::lock_guard<std::mutex> lock(frame_mutex_);
-    bgr_frame.copyTo(current_frame_);
+    current_jpeg_ = std::move(jpeg_buffer);
     frame_available_ = true;
 
     return true;
@@ -134,6 +147,8 @@ void RTSPServer::media_configure_callback(GstRTSPMediaFactory* factory,
     (void)factory;
     RTSPServer* self = static_cast<RTSPServer*>(user_data);
 
+    syslog(LOG_INFO, "Client connected, configuring media...");
+
     GstElement* element = gst_rtsp_media_get_element(media);
     GstElement* appsrc  = gst_bin_get_by_name_recurse_up(GST_BIN(element), "source");
 
@@ -141,6 +156,8 @@ void RTSPServer::media_configure_callback(GstRTSPMediaFactory* factory,
         self->appsrc_ = appsrc;
         g_signal_connect(appsrc, "need-data", G_CALLBACK(need_data_callback), user_data);
         syslog(LOG_INFO, "Media configured, appsrc connected");
+    } else {
+        syslog(LOG_ERR, "Failed to find appsrc element in pipeline");
     }
 
     gst_object_unref(element);
@@ -149,30 +166,33 @@ void RTSPServer::media_configure_callback(GstRTSPMediaFactory* factory,
 void RTSPServer::need_data_callback(GstElement* appsrc, guint unused, gpointer user_data) {
     (void)unused;
     RTSPServer* self = static_cast<RTSPServer*>(user_data);
+
+    static int need_data_count = 0;
+    if (++need_data_count % 100 == 1) {
+        syslog(LOG_INFO, "need-data callback #%d", need_data_count);
+    }
+
     self->on_need_data(appsrc);
 }
 
 void RTSPServer::on_need_data(GstElement* appsrc) {
-    if (!frame_available_) {
-        return;
-    }
-
-    cv::Mat frame;
+    std::vector<uchar> jpeg_data;
     {
         std::lock_guard<std::mutex> lock(frame_mutex_);
-        if (current_frame_.empty()) {
+        if (current_jpeg_.empty()) {
+            // No frame available yet, wait a bit
             return;
         }
-        current_frame_.copyTo(frame);
+        jpeg_data = current_jpeg_;  // Copy instead of move to keep last frame
         frame_available_ = false;
     }
 
-    gsize size = frame.total() * frame.elemSize();
+    gsize size = jpeg_data.size();
     GstBuffer* buffer = gst_buffer_new_allocate(nullptr, size, nullptr);
 
     GstMapInfo map;
     gst_buffer_map(buffer, &map, GST_MAP_WRITE);
-    std::memcpy(map.data, frame.data, size);
+    std::memcpy(map.data, jpeg_data.data(), size);
     gst_buffer_unmap(buffer, &map);
 
     // Set timestamp
@@ -184,4 +204,8 @@ void RTSPServer::on_need_data(GstElement* appsrc) {
     GstFlowReturn ret;
     g_signal_emit_by_name(appsrc, "push-buffer", buffer, &ret);
     gst_buffer_unref(buffer);
+
+    if (ret != GST_FLOW_OK) {
+        syslog(LOG_WARNING, "Failed to push buffer: %d", ret);
+    }
 }

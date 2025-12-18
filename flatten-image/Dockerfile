@@ -15,15 +15,12 @@ ARG BUILD_DIR=/opt/build
 # Prepare build environment
 #-------------------------------------------------------------------------------
 
-# Install build dependencies for cross compiling OpenCV and GStreamer
+# Install build dependencies for cross compiling OpenCV and GStreamer headers
 RUN DEBIAN_FRONTEND=noninteractive \
     apt-get update && apt-get install -y -f --no-install-recommends \
     cmake \
     meson \
-    ninja-build \
-    flex \
-    bison \
-    libglib2.0-dev && \
+    ninja-build && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -91,10 +88,10 @@ RUN if [ "$ARCH" = armv7hf ]; then \
     fi
 
 #-------------------------------------------------------------------------------
-# Build GStreamer RTSP Server
+# Build GStreamer RTSP Server (headers only - library exists on device)
 #-------------------------------------------------------------------------------
 
-ARG GST_VERSION=1.24.10
+ARG GST_VERSION=1.22.12
 ARG GST_DIR=${BUILD_DIR}/gstreamer
 ARG GST_RTSP_SRC_DIR=${GST_DIR}/gst-rtsp-server-${GST_VERSION}
 ARG GST_RTSP_BUILD_DIR=${GST_DIR}/rtsp-build
@@ -104,24 +101,35 @@ RUN curl -fsSL https://gstreamer.freedesktop.org/src/gst-rtsp-server/gst-rtsp-se
 
 WORKDIR ${GST_RTSP_BUILD_DIR}
 
-# Create meson cross-compilation file dynamically from SDK environment
+# Build gst-rtsp-server to install headers into SDK sysroot (library won't be bundled)
 # hadolint ignore=SC2086,SC2129
 RUN . /opt/axis/acapsdk/environment-setup* && \
     CROSS_FILE=/tmp/cross.txt && \
     C_COMPILER=$(echo $CC | awk '{print $1}') && \
     CXX_COMPILER=$(echo $CXX | awk '{print $1}') && \
+    C_ARGS=$(echo $CC | cut -d' ' -f2-) && \
+    SYSROOT=$(echo $CC | grep -oP -- '--sysroot=\K[^ ]+') && \
     printf '[binaries]\n' > $CROSS_FILE && \
     printf "c = '%s'\n" "$C_COMPILER" >> $CROSS_FILE && \
     printf "cpp = '%s'\n" "$CXX_COMPILER" >> $CROSS_FILE && \
     printf "ar = '%s'\n" "$AR" >> $CROSS_FILE && \
     printf "strip = '%s'\n" "$STRIP" >> $CROSS_FILE && \
     printf "pkgconfig = 'pkg-config'\n\n" >> $CROSS_FILE && \
+    printf '[built-in options]\n' >> $CROSS_FILE && \
+    printf "c_args = ['%s']\n" "$(echo $C_ARGS | sed "s/ /', '/g")" >> $CROSS_FILE && \
+    printf "c_link_args = ['%s']\n\n" "$(echo $C_ARGS | sed "s/ /', '/g")" >> $CROSS_FILE && \
     printf '[host_machine]\n' >> $CROSS_FILE && \
     printf "system = 'linux'\n" >> $CROSS_FILE && \
-    printf "cpu_family = 'aarch64'\n" >> $CROSS_FILE && \
-    printf "cpu = 'aarch64'\n" >> $CROSS_FILE && \
+    if [ "$ARCH" = armv7hf ]; then \
+        printf "cpu_family = 'arm'\n" >> $CROSS_FILE && \
+        printf "cpu = 'armv7hf'\n" >> $CROSS_FILE ; \
+    else \
+        printf "cpu_family = 'aarch64'\n" >> $CROSS_FILE && \
+        printf "cpu = 'aarch64'\n" >> $CROSS_FILE ; \
+    fi && \
     printf "endian = 'little'\n" >> $CROSS_FILE && \
-    cat $CROSS_FILE && \
+    PKG_CONFIG_SYSROOT_DIR=$SYSROOT \
+    PKG_CONFIG_PATH=$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig \
     meson setup ${GST_RTSP_SRC_DIR} ${GST_RTSP_BUILD_DIR} \
         --cross-file $CROSS_FILE \
         --prefix=${SDK_LIB_PATH_BASE} \
@@ -139,8 +147,7 @@ RUN . /opt/axis/acapsdk/environment-setup* && \
 WORKDIR /opt/app
 COPY ./app .
 RUN mkdir -p lib && \
-    cp -P ${OPENCV_BUILD_DIR}/lib/lib*.so* ./lib/ && \
-    cp -P ${SDK_LIB_PATH_BASE}/lib/libgstrtspserver-1.0.so* ./lib/
+    cp -P ${OPENCV_BUILD_DIR}/lib/lib*.so* ./lib/
 
 #-------------------------------------------------------------------------------
 # Finally build the ACAP application
