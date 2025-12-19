@@ -21,21 +21,29 @@
 
 enum class LensType { FISHEYE, DUAL_FISHEYE, PANORAMIC };
 
-enum class ProjectionType { EQUIRECTANGULAR, RECTILINEAR, CYLINDRICAL };
+enum class ProjectionType { EQUIRECTANGULAR, RECTILINEAR, CYLINDRICAL, FISHEYE_UNDISTORT };
 
 struct DewarperConfig {
     LensType lens_type           = LensType::FISHEYE;
-    ProjectionType projection    = ProjectionType::EQUIRECTANGULAR;
+    ProjectionType projection    = ProjectionType::FISHEYE_UNDISTORT;
     float input_fov              = 180.0f;
     unsigned int input_width     = 0;
     unsigned int input_height    = 0;
     unsigned int output_width    = 1920;
-    unsigned int output_height   = 1080;
+    unsigned int output_height   = 1920;
     float center_x               = 0.5f;
     float center_y               = 0.5f;
     float pan_angle              = 0.0f;
     float tilt_angle             = 0.0f;
     float rectilinear_fov        = 90.0f;
+
+    // Fisheye undistort parameters (matching Python dewarp_gui.py)
+    float focal_length = 960.0f;
+    float k1           = 0.0f;
+    float k2           = 0.0f;
+    float k3           = 0.0f;
+    float k4           = 0.0f;
+    float scale        = 0.5f;
 };
 
 class Dewarper {
@@ -64,6 +72,7 @@ private:
     void build_equirectangular_map();
     void build_rectilinear_map();
     void build_cylindrical_map();
+    void build_fisheye_undistort_map();
 
     DewarperConfig config_;
     cv::Mat map_x_;

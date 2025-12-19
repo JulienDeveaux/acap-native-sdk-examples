@@ -103,10 +103,10 @@ int main(void) {
 
     // Read configuration from parameters
     std::string lens_type_str   = get_param_string(param_handle, "LensType", "fisheye");
-    std::string projection_str  = get_param_string(param_handle, "Projection", "equirectangular");
+    std::string projection_str  = get_param_string(param_handle, "Projection", "fisheye_undistort");
     float input_fov             = get_param_float(param_handle, "InputFOV", 180.0f);
-    unsigned int output_width   = get_param_uint(param_handle, "OutputWidth", 1920);
-    unsigned int output_height  = get_param_uint(param_handle, "OutputHeight", 1080);
+    unsigned int output_width   = get_param_uint(param_handle, "OutputWidth", 2992);
+    unsigned int output_height  = get_param_uint(param_handle, "OutputHeight", 2992);
     unsigned int rtsp_port      = get_param_uint(param_handle, "RTSPPort", 8554);
     unsigned int framerate      = get_param_uint(param_handle, "Framerate", 15);
     float center_x              = get_param_float(param_handle, "CenterX", 0.5f);
@@ -115,6 +115,14 @@ int main(void) {
     float tilt_angle            = get_param_float(param_handle, "TiltAngle", 0.0f);
     float rectilinear_fov       = get_param_float(param_handle, "RectilinearFOV", 90.0f);
 
+    // Fisheye undistort parameters
+    float focal_length = get_param_float(param_handle, "FocalLength", 1496.0f);
+    float k1           = get_param_float(param_handle, "K1", -0.25f);
+    float k2           = get_param_float(param_handle, "K2", 0.05f);
+    float k3           = get_param_float(param_handle, "K3", 0.0f);
+    float k4           = get_param_float(param_handle, "K4", 0.0f);
+    float scale        = get_param_float(param_handle, "Scale", 0.5f);
+
     syslog(LOG_INFO,
            "Configuration: lens=%s, projection=%s, output=%ux%u, fps=%u",
            lens_type_str.c_str(),
@@ -122,6 +130,14 @@ int main(void) {
            output_width,
            output_height,
            framerate);
+    syslog(LOG_INFO,
+           "Fisheye params: f=%.1f, k=(%.4f,%.4f,%.4f,%.4f), scale=%.2f",
+           focal_length,
+           k1,
+           k2,
+           k3,
+           k4,
+           scale);
 
     // Setup VDO stream for input
     // Use same resolution as output for simplicity, could be different
@@ -163,6 +179,12 @@ int main(void) {
     dewarp_config.pan_angle       = pan_angle;
     dewarp_config.tilt_angle      = tilt_angle;
     dewarp_config.rectilinear_fov = rectilinear_fov;
+    dewarp_config.focal_length    = focal_length;
+    dewarp_config.k1              = k1;
+    dewarp_config.k2              = k2;
+    dewarp_config.k3              = k3;
+    dewarp_config.k4              = k4;
+    dewarp_config.scale           = scale;
 
     Dewarper dewarper;
     if (!dewarper.init(dewarp_config)) {

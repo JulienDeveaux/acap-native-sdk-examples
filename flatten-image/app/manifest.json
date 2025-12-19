@@ -26,8 +26,8 @@
                 },
                 {
                     "name": "Projection",
-                    "default": "equirectangular",
-                    "type": "enum:equirectangular,rectilinear,cylindrical"
+                    "default": "fisheye_undistort",
+                    "type": "enum:fisheye_undistort,equirectangular,rectilinear,cylindrical"
                 },
                 {
                     "name": "InputFOV",
@@ -36,12 +36,12 @@
                 },
                 {
                     "name": "OutputWidth",
-                    "default": "1920",
+                    "default": "2992",
                     "type": "string"
                 },
                 {
                     "name": "OutputHeight",
-                    "default": "1080",
+                    "default": "2992",
                     "type": "string"
                 },
                 {
@@ -77,6 +77,36 @@
                 {
                     "name": "RectilinearFOV",
                     "default": "90",
+                    "type": "string"
+                },
+                {
+                    "name": "FocalLength",
+                    "default": "1496",
+                    "type": "string"
+                },
+                {
+                    "name": "K1",
+                    "default": "0.0",
+                    "type": "string"
+                },
+                {
+                    "name": "K2",
+                    "default": "0.0",
+                    "type": "string"
+                },
+                {
+                    "name": "K3",
+                    "default": "0.0",
+                    "type": "string"
+                },
+                {
+                    "name": "K4",
+                    "default": "0.0",
+                    "type": "string"
+                },
+                {
+                    "name": "Scale",
+                    "default": "0.5",
                     "type": "string"
                 }
             ]

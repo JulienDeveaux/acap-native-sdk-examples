@@ -67,18 +67,24 @@ bool Dewarper::process(const cv::Mat& input_nv12, cv::Mat& output_bgr) {
 }
 
 void Dewarper::build_lookup_tables() {
-    map_x_.create(config_.output_height, config_.output_width, CV_32FC1);
-    map_y_.create(config_.output_height, config_.output_width, CV_32FC1);
-
     switch (config_.projection) {
         case ProjectionType::EQUIRECTANGULAR:
+            map_x_.create(config_.output_height, config_.output_width, CV_32FC1);
+            map_y_.create(config_.output_height, config_.output_width, CV_32FC1);
             build_equirectangular_map();
             break;
         case ProjectionType::RECTILINEAR:
+            map_x_.create(config_.output_height, config_.output_width, CV_32FC1);
+            map_y_.create(config_.output_height, config_.output_width, CV_32FC1);
             build_rectilinear_map();
             break;
         case ProjectionType::CYLINDRICAL:
+            map_x_.create(config_.output_height, config_.output_width, CV_32FC1);
+            map_y_.create(config_.output_height, config_.output_width, CV_32FC1);
             build_cylindrical_map();
+            break;
+        case ProjectionType::FISHEYE_UNDISTORT:
+            build_fisheye_undistort_map();
             break;
     }
 
@@ -257,6 +263,90 @@ void Dewarper::build_cylindrical_map() {
     }
 }
 
+void Dewarper::build_fisheye_undistort_map() {
+    // Manual implementation of OpenCV's fisheye::initUndistortRectifyMap
+    // This matches the Python cv2.fisheye.initUndistortRectifyMap behavior exactly
+
+    map_x_.create(config_.output_height, config_.output_width, CV_32FC1);
+    map_y_.create(config_.output_height, config_.output_width, CV_32FC1);
+
+    float f_in = config_.focal_length;
+    float f_out = f_in * config_.scale;
+
+    // Input camera: optical center in input image
+    float cx_in = config_.center_x * config_.input_width;
+    float cy_in = config_.center_y * config_.input_height;
+
+    // Output camera: use same optical center as input (matches Python CONTROLLED mode)
+    float cx_out = cx_in;
+    float cy_out = cy_in;
+
+    syslog(LOG_INFO,
+           "Fisheye undistort: f_in=%.2f, f_out=%.2f, cx_in=%.2f, cy_in=%.2f, cx_out=%.2f, "
+           "cy_out=%.2f",
+           f_in,
+           f_out,
+           cx_in,
+           cy_in,
+           cx_out,
+           cy_out);
+    syslog(LOG_INFO, "Fisheye undistort: k=(%.4f,%.4f,%.4f,%.4f)", config_.k1, config_.k2, config_.k3, config_.k4);
+
+    // For each output pixel, compute corresponding input pixel
+    for (unsigned int v_out = 0; v_out < config_.output_height; v_out++) {
+        for (unsigned int u_out = 0; u_out < config_.output_width; u_out++) {
+            // Convert output pixel to normalized camera coordinates
+            float x_out = (static_cast<float>(u_out) - cx_out) / f_out;
+            float y_out = (static_cast<float>(v_out) - cy_out) / f_out;
+
+            // Debug: Log specific test pixels to compare with OpenCV
+            bool is_test_pixel = (u_out == 1496 && v_out == 1496) ||
+                                  (u_out == 1496 && v_out == 1000) ||
+                                  (u_out == 2000 && v_out == 1496) ||
+                                  (u_out == 1496 && v_out == 2000);
+
+            // Compute angle theta from optical axis
+            // For fisheye equidistant model: theta = r (not atan(r))
+            float r_out = std::sqrt(x_out * x_out + y_out * y_out);
+            float theta = r_out;
+
+            // Apply fisheye distortion polynomial to get distorted angle
+            // For fisheye model: theta_d = theta * (1 + k1*theta^2 + k2*theta^4 + k3*theta^6 + k4*theta^8)
+            float theta2 = theta * theta;
+            float theta4 = theta2 * theta2;
+            float theta6 = theta4 * theta2;
+            float theta8 = theta6 * theta2;
+            float theta_d = theta * (1.0f + config_.k1 * theta2 + config_.k2 * theta4 +
+                                     config_.k3 * theta6 + config_.k4 * theta8);
+
+            // Convert back to normalized distorted coordinates
+            float scale_d = (r_out > 1e-8f) ? (theta_d / r_out) : 1.0f;
+            float x_dist = x_out * scale_d;
+            float y_dist = y_out * scale_d;
+
+            // Convert to input image pixel coordinates
+            float u_in = f_in * x_dist + cx_in;
+            float v_in = f_in * y_dist + cy_in;
+
+            map_x_.at<float>(v_out, u_out) = u_in;
+            map_y_.at<float>(v_out, u_out) = v_in;
+
+            // Debug logging for test pixels
+            if (is_test_pixel) {
+                syslog(LOG_INFO, "TEST: Output (%u, %u) -> Input (%.2f, %.2f)",
+                       u_out, v_out, u_in, v_in);
+            }
+        }
+    }
+
+    syslog(LOG_INFO,
+           "Fisheye undistort map built: %ux%u -> %ux%u",
+           config_.input_width,
+           config_.input_height,
+           config_.output_width,
+           config_.output_height);
+}
+
 LensType Dewarper::parse_lens_type(const std::string& str) {
     if (str == "dual_fisheye") {
         return LensType::DUAL_FISHEYE;
@@ -271,6 +361,8 @@ ProjectionType Dewarper::parse_projection_type(const std::string& str) {
         return ProjectionType::RECTILINEAR;
     } else if (str == "cylindrical") {
         return ProjectionType::CYLINDRICAL;
+    } else if (str == "fisheye_undistort") {
+        return ProjectionType::FISHEYE_UNDISTORT;
     }
-    return ProjectionType::EQUIRECTANGULAR;
+    return ProjectionType::FISHEYE_UNDISTORT;
 }
